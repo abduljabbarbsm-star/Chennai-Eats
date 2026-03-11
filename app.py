@@ -5,15 +5,21 @@ import os
 app = Flask(__name__)
 
 # Load the dataset
-CSV_PATH = os.path.join('data', 'restaurants.csv')
+CSV_PATH = os.path.join(os.path.dirname(__file__), 'data', 'restaurants.csv')
 
 def load_data():
-    df = pd.read_csv(CSV_PATH)
-    # Ensure numeric columns are handled
-    df['price'] = pd.to_numeric(df['price'])
-    df['rating'] = pd.to_numeric(df['rating'])
-    df['popularity_score'] = pd.to_numeric(df['popularity_score'])
-    return df
+    if not os.path.exists(CSV_PATH):
+        # Create an empty dataframe with correct columns if file is missing
+        return pd.DataFrame(columns=['restaurant_name', 'food_item', 'category', 'price', 'rating', 'popularity_score', 'location'])
+    try:
+        df = pd.read_csv(CSV_PATH)
+        df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
+        df['rating'] = pd.to_numeric(df['rating'], errors='coerce').fillna(0)
+        df['popularity_score'] = pd.to_numeric(df['popularity_score'], errors='coerce').fillna(0)
+        return df
+    except Exception as e:
+        print(f"Error loading CSV: {e}")
+        return pd.DataFrame()
 
 @app.route('/')
 def index():
@@ -36,11 +42,13 @@ def index():
 def restaurant_details(name):
     df = load_data()
     restaurant_items = df[df['restaurant_name'] == name].to_dict('records')
+    if not restaurant_items:
+        return "Restaurant not found", 404
     details = {
         'name': name,
-        'location': restaurant_items[0]['location'],
-        'rating': round(sum(i['rating'] for i in restaurant_items) / len(restaurant_items), 1),
-        'category': 'Veg/Non-Veg' if any(i['category'] == 'veg' for i in restaurant_items) and any(i['category'] == 'non-veg' for i in restaurant_items) else ('Veg' if any(i['category'] == 'veg' for i in restaurant_items) else 'Non-Veg')
+        'location': restaurant_items[0].get('location', 'Unknown'),
+        'rating': round(sum(i.get('rating', 0) for i in restaurant_items) / len(restaurant_items), 1),
+        'category': 'Veg/Non-Veg' if any(i.get('category') == 'veg' for i in restaurant_items) and any(i.get('category') == 'non-veg' for i in restaurant_items) else ('Veg' if any(i.get('category') == 'veg' for i in restaurant_items) else 'Non-Veg')
     }
     return render_template('restaurant.html', details=details, items=restaurant_items)
 
@@ -51,6 +59,8 @@ def dashboard():
 @app.route('/api/analytics')
 def analytics_data():
     df = load_data()
+    if df.empty:
+        return jsonify({'top_restaurants': [], 'top_dishes': [], 'veg_dist': {}, 'avg_price': {}})
     
     # 1. Top 5 Restaurants based on Rating and Popularity
     df['composite_score'] = (df['rating'] * 0.6) + (df['popularity_score'] * 0.04)
